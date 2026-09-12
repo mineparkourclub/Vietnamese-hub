@@ -1,136 +1,218 @@
--- Vietnamese Hub
--- Original Script - Vietnam Flag Theme
--- https://github.com/mineparkourclub/Vietnamese-hub
+-- Vietnamese Hub for Blox Fruits
 
-local function LoadHub()
-    if not game:IsLoaded() then game.Loaded:Wait() end
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Humanoid = Character:WaitForChild("Humanoid")
+
+-- Vietnamese Flag Colors
+local VIETNAM_RED = Color3.fromRGB(218, 37, 29)    -- Do
+local VIETNAM_YELLOW = Color3.fromRGB(255, 255, 0)  -- Vang
+local DARK_RED = Color3.fromRGB(139, 0, 0)
+
+-- Services
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local CommF_ = Remotes:WaitForChild("CommF_")
+
+-- State Management
+local VietnameseHub = {
+    Enabled = false,
+    AutoFarm = false,
+    AutoAttack = false,
+    AutoBuso = false,
+    FastAttack = false,
+    Noclip = false,
+    Flying = false,
+    SelectedEnemy = nil,
+    CurrentSea = 1
+}
+
+-- Sea Detection System
+function VietnameseHub:GetCurrentSea()
+    local pos = HumanoidRootPart.Position
     
-    local Players = game:GetService("Players")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local Workspace = game:GetService("Workspace")
-    local VirtualUser = game:GetService("VirtualUser")
-    local TweenService = game:GetService("TweenService")
-    local UserInputService = game:GetService("UserInputService")
-    local HttpService = game:GetService("HttpService")
+    -- Sea 1: Starter area, Pirate Village, etc. (Y < 1000, specific zones)
+    if pos.Y < 1000 then
+        -- Check for Sea 1 specific locations
+        if Workspace:FindFirstChild("StartIsland") or 
+           Workspace:FindFirstChild("PirateVillage") or
+           Workspace:FindFirstChild("Jungle") then
+            VietnameseHub.CurrentSea = 1
+            return 1
+        end
+    end
     
-    local Player = Players.LocalPlayer
-    local Character = Player.Character or Player.CharacterAdded:Wait()
-    local Humanoid = Character:WaitForChild("Humanoid")
-    local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-    
-    -- Vietnam Flag Colors
-    local VN_RED = Color3.fromRGB(218, 37, 29)
-    local VN_YELLOW = Color3.fromRGB(255, 222, 0)
-    local DARK_BG = Color3.fromRGB(20, 20, 20)
-    local PANEL_BG = Color3.fromRGB(30, 30, 30)
-    local BUTTON_BG = Color3.fromRGB(40, 40, 40)
-    
-    -- Detect Sea
-    local function GetSea()
-        local pos = HumanoidRootPart.Position
-        if pos.Z > -2000 and pos.Z < 2000 and pos.X > -4000 and pos.X < 4000 then return 1 end
-        if pos.Z > 50000 or pos.Z < -50000 then return 3 end
+    -- Sea 2: New World (Y > 1000, Cafe, etc.)
+    if Workspace:FindFirstChild("Cafe") or 
+       Workspace:FindFirstChild("Dressrosa") or
+       Workspace:FindFirstChild("SwanRoom") then
+        VietnameseHub.CurrentSea = 2
         return 2
     end
     
-    local CurrentSea = GetSea()
+    -- Sea 3: Third Sea (Castle, etc.)
+    if Workspace:FindFirstChild("Castle") or
+       Workspace:FindFirstChild("HydraIsland") or
+       Workspace:FindFirstChild("Mansion") then
+        VietnameseHub.CurrentSea = 3
+        return 3
+    end
     
-    -- Config
-    local Config = {
-        AutoFarm = false,
-        AutoBoss = false,
-        AutoMastery = false,
-        AutoSeaBeast = false,
-        AutoRaid = false,
-        AutoFruit = false,
-        AutoStats = {Melee = false, Defense = false, Sword = false, Gun = false, Fruit = false},
-        Weapon = "Melee",
-        SelectedStats = "Melee"
-    }
+    return VietnameseHub.CurrentSea
+end
+
+-- Enemy Detection - Prioritize Pirates in Sea 1
+function VietnameseHub:GetNearestEnemy()
+    local nearest = nil
+    local minDistance = math.huge
+    local currentSea = VietnameseHub:GetCurrentSea()
     
-    -- Get Enemy
-    function GetEnemy(sea)
-        local nearest, dist = nil, math.huge
-        for _, enemy in pairs(Workspace.Enemies:GetChildren()) do
-            if enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") and enemy.Humanoid.Health > 0 then
-                local valid = false
-                if sea == 1 then
-                    valid = table.find({"Bandit","Monkey","Gorilla","Pirate","Brute","Desert Bandit","Desert Officer","Snow Bandit","Snowman","Chief Petty Officer","Vice Admiral"}, enemy.Name)
-                elseif sea == 2 then
-                    valid = table.find({"Raider","Mercenary","Swan Pirate","Factory Staff","Marine Lieutenant","Marine Captain","Zombie","Vampire","Snow Trooper","Winter Warrior"}, enemy.Name)
-                else
-                    valid = table.find({"Pirate Millionaire","Dragon Crew Warrior","Dragon Crew Archer","Ghoul","Reformed Revolutionary","Cocoa Warrior","Chocolate Bar Battler","Sweet Thief"}, enemy.Name)
+    local enemiesFolder = Workspace:FindFirstChild("Enemies")
+    if not enemiesFolder then return nil end
+    
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+        if enemy:IsA("Model") and enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") then
+            local humanoid = enemy.Humanoid
+            local rootPart = enemy.HumanoidRootPart
+            
+            -- Skip dead enemies
+            if humanoid.Health <= 0 then continue end
+            
+            local distance = (rootPart.Position - HumanoidRootPart.Position).Magnitude
+            
+            -- Prioritize "Pirate" starters in Sea 1
+            local isPriority = false
+            if currentSea == 1 then
+                local name = enemy.Name:lower()
+                if name:find("pirate") or name:find("bandit") or name:find("enemy") then
+                    isPriority = true
                 end
+            end
+            
+            -- Closer distance or priority target
+            if distance < minDistance or (isPriority and distance < minDistance * 1.5) then
+                minDistance = distance
+                nearest = enemy
+            end
+        end
+    end
+    
+    return nearest
+end
+
+-- Flying System using TweenService
+function VietnameseHub:FlyToPosition(targetPosition, speed)
+    speed = speed or 250
+    local distance = (targetPosition - HumanoidRootPart.Position).Magnitude
+    local duration = distance / speed
+    
+    local tweenInfo = TweenInfo.new(
+        duration,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.InOut
+    )
+    
+    local tween = TweenService:Create(
+        HumanoidRootPart,
+        tweenInfo,
+        {CFrame = CFrame.new(targetPosition)}
+    )
+    
+    tween:Play()
+    return tween
+end
+
+-- Auto Buso Haki
+function VietnameseHub:EnableBuso()
+    pcall(function()
+        CommF_:InvokeServer("Buso")
+    end)
+end
+
+-- Fast Attack System
+function VietnameseHub:FastAttack()
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:Button1Down(Vector2.new(0, 0))
+    end)
+end
+
+-- Noclip System
+function VietnameseHub:EnableNoclip()
+    RunService.Stepped:Connect(function()
+        if VietnameseHub.Noclip and Character then
+            for _, part in ipairs(Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+end
+
+-- Auto Farm Loop
+function VietnameseHub:StartAutoFarm()
+    task.spawn(function()
+        while VietnameseHub.AutoFarm do
+            task.wait(0.1)
+            
+            if not VietnameseHub.AutoFarm then break end
+            
+            -- Auto Buso
+            if VietnameseHub.AutoBuso then
+                VietnameseHub:EnableBuso()
+            end
+            
+            -- Get target
+            local enemy = VietnameseHub:GetNearestEnemy()
+            if enemy and enemy:FindFirstChild("HumanoidRootPart") then
+                VietnameseHub.SelectedEnemy = enemy
                 
-                if valid then
-                    local d = (HumanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
-                    if d < dist then dist = d nearest = enemy end
+                -- Fly to enemy
+                local targetPos = enemy.HumanoidRootPart.Position + Vector3.new(0, 20, 0)
+                VietnameseHub:FlyToPosition(targetPos, 300)
+                
+                -- Attack
+                if VietnameseHub.AutoAttack then
+                    VietnameseHub:FastAttack()
                 end
             end
         end
-        return nearest
-    end
-    
-    -- Get Boss
-    function GetBoss(sea)
-        local bosses = sea == 1 and {"The Gorilla King","Bobby","Yeti","Mob Leader","Vice Admiral","Warden","Chief Warden","Swan","Magma Admiral","Fishman Lord","Wysper","Thunder God","Cyborg","Saber Expert","Darkbeard","Ice Admiral"}
-            or sea == 2 and {"Diamond","Jeremy","Fajita","Don Swan","Smoke Admiral","Awakened Ice Admiral","Tide Keeper","Cursed Captain"}
-            or {"Cake Queen","Kilo Admiral","Captain Elephant","Beautiful Pirate","Longma","Soul Reaper","rip_indra"}
-        
-        for _, enemy in pairs(Workspace.Enemies:GetChildren()) do
-            for _, bossName in pairs(bosses) do
-                if enemy.Name == bossName and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
-                    return enemy
-                end
-            end
-        end
-        return nil
-    end
-    
-    -- Get Sea Beast
-    function GetSeaBeast()
-        for _, v in pairs(Workspace:GetChildren()) do
-            if v.Name:lower():find("seabeast") and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-                return v
-            end
-        end
-        return nil
-    end
-    
-    -- Auto Click
-    function AutoClick()
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:Button1Down(Vector2.new(1280, 672))
-            wait(0.05)
-            VirtualUser:Button1Up(Vector2.new(1280, 672))
-        end)
-    end
-    
-    -- UI LIBRARY (Redz-style)
+    end)
+end
+
+-- UI Creation
+function VietnameseHub:CreateUI()
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "VietnameseHub"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.Parent = game.CoreGui
+    ScreenGui.Parent = game:GetService("CoreGui")
     
-    -- Main Frame
+    -- Main Frame (Vietnam Flag Style)
     local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "Main"
-    MainFrame.Size = UDim2.new(0, 600, 0, 400)
-    MainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
-    MainFrame.BackgroundColor3 = DARK_BG
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 400, 0, 500)
+    MainFrame.Position = UDim2.new(0.5, -200, 0.5, -250)
+    MainFrame.BackgroundColor3 = VIETNAM_RED
     MainFrame.BorderSizePixel = 0
     MainFrame.Parent = ScreenGui
     
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 8)
-    MainCorner.Parent = MainFrame
+    -- Corner
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = MainFrame
     
     -- Title Bar
     local TitleBar = Instance.new("Frame")
     TitleBar.Name = "TitleBar"
-    TitleBar.Size = UDim2.new(1, 0, 0, 45)
-    TitleBar.BackgroundColor3 = VN_RED
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = DARK_RED
     TitleBar.BorderSizePixel = 0
     TitleBar.Parent = MainFrame
     
@@ -138,643 +220,118 @@ local function LoadHub()
     TitleCorner.CornerRadius = UDim.new(0, 8)
     TitleCorner.Parent = TitleBar
     
-    -- Vietnam Star Icon
-    local IconFrame = Instance.new("Frame")
-    IconFrame.Size = UDim2.new(0, 30, 0, 30)
-    IconFrame.Position = UDim2.new(0, 10, 0, 7)
-    IconFrame.BackgroundColor3 = VN_YELLOW
-    IconFrame.Parent = TitleBar
-    
-    local IconCorner = Instance.new("UICorner")
-    IconCorner.CornerRadius = UDim.new(1, 0)
-    IconCorner.Parent = IconFrame
-    
-    -- Star shape using text
-    local StarLabel = Instance.new("TextLabel")
-    StarLabel.Size = UDim2.new(1, 0, 1, 0)
-    StarLabel.BackgroundTransparency = 1
-    StarLabel.Text = "★"
-    StarLabel.TextColor3 = VN_RED
-    StarLabel.TextSize = 20
-    StarLabel.Font = Enum.Font.GothamBold
-    StarLabel.Parent = IconFrame
-    
-    -- Title
+    -- Title Text
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, -150, 1, 0)
-    Title.Position = UDim2.new(0, 50, 0, 0)
+    Title.Name = "Title"
+    Title.Size = UDim2.new(1, 0, 1, 0)
     Title.BackgroundTransparency = 1
-    Title.Text = "VIETNAMESE HUB"
-    Title.TextColor3 = VN_YELLOW
-    Title.TextSize = 18
+    Title.Text = "🇻🇳 Vietnamese Hub 🇻🇳"
+    Title.TextColor3 = VIETNAM_YELLOW
+    Title.TextSize = 24
     Title.Font = Enum.Font.GothamBold
-    Title.TextXAlignment = Enum.TextXAlignment.Left
     Title.Parent = TitleBar
     
-    -- Sea Indicator
-    local SeaLabel = Instance.new("TextLabel")
-    SeaLabel.Size = UDim2.new(0, 80, 0, 25)
-    SeaLabel.Position = UDim2.new(1, -180, 0, 10)
-    SeaLabel.BackgroundColor3 = DARK_BG
-    SeaLabel.Text = "Sea " .. CurrentSea
-    SeaLabel.TextColor3 = VN_YELLOW
-    SeaLabel.TextSize = 12
-    SeaLabel.Font = Enum.Font.GothamBold
-    SeaLabel.Parent = TitleBar
+    -- Star Decoration (Vietnam Flag Star)
+    local Star = Instance.new("TextLabel")
+    Star.Size = UDim2.new(0, 60, 0, 60)
+    Star.Position = UDim2.new(0.5, -30, 0.15, 0)
+    Star.BackgroundTransparency = 1
+    Star.Text = "⭐"
+    Star.TextSize = 50
+    Star.Parent = MainFrame
     
-    local SeaCorner = Instance.new("UICorner")
-    SeaCorner.CornerRadius = UDim.new(0, 4)
-    SeaCorner.Parent = SeaLabel
+    -- Button Container
+    local ButtonContainer = Instance.new("ScrollingFrame")
+    ButtonContainer.Name = "ButtonContainer"
+    ButtonContainer.Size = UDim2.new(1, -20, 0.7, 0)
+    ButtonContainer.Position = UDim2.new(0, 10, 0.25, 0)
+    ButtonContainer.BackgroundTransparency = 1
+    ButtonContainer.ScrollBarThickness = 4
+    ButtonContainer.Parent = MainFrame
     
-    -- Close Button
-    local CloseBtn = Instance.new("TextButton")
-    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-    CloseBtn.Position = UDim2.new(1, -35, 0, 7)
-    CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-    CloseBtn.Text = "X"
-    CloseBtn.TextColor3 = Color3.new(1, 1, 1)
-    CloseBtn.TextSize = 14
-    CloseBtn.Font = Enum.Font.GothamBold
-    CloseBtn.Parent = TitleBar
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.Padding = UDim.new(0, 10)
+    UIListLayout.Parent = ButtonContainer
     
-    local CloseCorner = Instance.new("UICorner")
-    CloseCorner.CornerRadius = UDim.new(0, 6)
-    CloseCorner.Parent = CloseBtn
-    
-    -- Minimize Button
-    local MinBtn = Instance.new("TextButton")
-    MinBtn.Size = UDim2.new(0, 30, 0, 30)
-    MinBtn.Position = UDim2.new(1, -70, 0, 7)
-    MinBtn.BackgroundColor3 = BUTTON_BG
-    MinBtn.Text = "-"
-    MinBtn.TextColor3 = Color3.new(1, 1, 1)
-    MinBtn.TextSize = 18
-    MinBtn.Font = Enum.Font.GothamBold
-    MinBtn.Parent = TitleBar
-    
-    local MinCorner = Instance.new("UICorner")
-    MinCorner.CornerRadius = UDim.new(0, 6)
-    MinCorner.Parent = MinBtn
-    
-    -- Sidebar
-    local Sidebar = Instance.new("Frame")
-    Sidebar.Name = "Sidebar"
-    Sidebar.Size = UDim2.new(0, 150, 1, -45)
-    Sidebar.Position = UDim2.new(0, 0, 0, 45)
-    Sidebar.BackgroundColor3 = PANEL_BG
-    Sidebar.BorderSizePixel = 0
-    Sidebar.Parent = MainFrame
-    
-    local SideCorner = Instance.new("UICorner")
-    SideCorner.CornerRadius = UDim.new(0, 0)
-    SideCorner.Parent = Sidebar
-    
-    -- Tab Buttons Container
-    local TabContainer = Instance.new("ScrollingFrame")
-    TabContainer.Size = UDim2.new(1, 0, 1, 0)
-    TabContainer.BackgroundTransparency = 1
-    TabContainer.ScrollBarThickness = 2
-    TabContainer.Parent = Sidebar
-    
-    local TabLayout = Instance.new("UIListLayout")
-    TabLayout.Padding = UDim.new(0, 5)
-    TabLayout.Parent = TabContainer
-    
-    -- Content Area
-    local ContentArea = Instance.new("Frame")
-    ContentArea.Name = "Content"
-    ContentArea.Size = UDim2.new(1, -150, 1, -45)
-    ContentArea.Position = UDim2.new(0, 150, 0, 45)
-    ContentArea.BackgroundTransparency = 1
-    ContentArea.Parent = MainFrame
-    
-    -- Tab System
-    local Tabs = {}
-    local CurrentTab = nil
-    
-    local function CreateTab(name, icon)
-        local TabBtn = Instance.new("TextButton")
-        TabBtn.Size = UDim2.new(1, -10, 0, 40)
-        TabBtn.Position = UDim2.new(0, 5, 0, 0)
-        TabBtn.BackgroundColor3 = BUTTON_BG
-        TabBtn.Text = "  " .. icon .. "  " .. name
-        TabBtn.TextColor3 = Color3.new(1, 1, 1)
-        TabBtn.TextSize = 13
-        TabBtn.Font = Enum.Font.GothamSemibold
-        TabBtn.TextXAlignment = Enum.TextXAlignment.Left
-        TabBtn.Parent = TabContainer
-        
-        local TabBtnCorner = Instance.new("UICorner")
-        TabBtnCorner.CornerRadius = UDim.new(0, 6)
-        TabBtnCorner.Parent = TabBtn
-        
-        local TabContent = Instance.new("ScrollingFrame")
-        TabContent.Name = name .. "Content"
-        TabContent.Size = UDim2.new(1, -10, 1, -10)
-        TabContent.Position = UDim2.new(0, 5, 0, 5)
-        TabContent.BackgroundTransparency = 1
-        TabContent.ScrollBarThickness = 3
-        TabContent.Visible = false
-        TabContent.Parent = ContentArea
-        
-        local ContentLayout = Instance.new("UIListLayout")
-        ContentLayout.Padding = UDim.new(0, 8)
-        ContentLayout.Parent = TabContent
-        
-        table.insert(Tabs, {Button = TabBtn, Content = TabContent, Name = name})
-        
-        return TabContent
-    end
-    
-    local function SwitchTab(tabName)
-        for _, tab in pairs(Tabs) do
-            if tab.Name == tabName then
-                tab.Content.Visible = true
-                tab.Button.BackgroundColor3 = VN_RED
-                TweenService:Create(tab.Button, TweenInfo.new(0.2), {BackgroundColor3 = VN_RED}):Play()
-                CurrentTab = tab
-            else
-                tab.Content.Visible = false
-                tab.Button.BackgroundColor3 = BUTTON_BG
-            end
-        end
-    end
-    
-    -- Create Toggle Function
-    local function CreateToggle(parent, text, configKey, callback)
-        local ToggleFrame = Instance.new("Frame")
-        ToggleFrame.Size = UDim2.new(1, 0, 0, 45)
-        ToggleFrame.BackgroundColor3 = PANEL_BG
-        ToggleFrame.Parent = parent
-        
-        local ToggleCorner = Instance.new("UICorner")
-        ToggleCorner.CornerRadius = UDim.new(0, 6)
-        ToggleCorner.Parent = ToggleFrame
-        
-        local Label = Instance.new("TextLabel")
-        Label.Size = UDim2.new(1, -70, 1, 0)
-        Label.Position = UDim2.new(0, 15, 0, 0)
-        Label.BackgroundTransparency = 1
-        Label.Text = text
-        Label.TextColor3 = Color3.new(1, 1, 1)
-        Label.TextSize = 13
-        Label.Font = Enum.Font.Gotham
-        Label.TextXAlignment = Enum.TextXAlignment.Left
-        Label.Parent = ToggleFrame
-        
-        local ToggleBtn = Instance.new("TextButton")
-        ToggleBtn.Size = UDim2.new(0, 50, 0, 26)
-        ToggleBtn.Position = UDim2.new(1, -60, 0.5, -13)
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        ToggleBtn.Text = ""
-        ToggleBtn.Parent = ToggleFrame
-        
-        local ToggleBtnCorner = Instance.new("UICorner")
-        ToggleBtnCorner.CornerRadius = UDim.new(1, 0)
-        ToggleBtnCorner.Parent = ToggleBtn
-        
-        local Circle = Instance.new("Frame")
-        Circle.Size = UDim2.new(0, 20, 0, 20)
-        Circle.Position = UDim2.new(0, 3, 0.5, -10)
-        Circle.BackgroundColor3 = Color3.new(1, 1, 1)
-        Circle.Parent = ToggleBtn
-        
-        local CircleCorner = Instance.new("UICorner")
-        CircleCorner.CornerRadius = UDim.new(1, 0)
-        CircleCorner.Parent = Circle
-        
-        local enabled = false
-        
-        ToggleBtn.MouseButton1Click:Connect(function()
-            enabled = not enabled
-            Config[configKey] = enabled
-            
-            if enabled then
-                TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = VN_RED}):Play()
-                TweenService:Create(Circle, TweenInfo.new(0.2), {Position = UDim2.new(0, 27, 0.5, -10)}):Play()
-            else
-                TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(60, 60, 60)}):Play()
-                TweenService:Create(Circle, TweenInfo.new(0.2), {Position = UDim2.new(0, 3, 0.5, -10)}):Play()
-            end
-            
-            if callback then callback(enabled) end
-        end)
-        
-        return ToggleFrame
-    end
-    
-    -- Create Button Function
-    local function CreateButton(parent, text, callback)
-        local BtnFrame = Instance.new("Frame")
-        BtnFrame.Size = UDim2.new(1, 0, 0, 40)
-        BtnFrame.BackgroundColor3 = PANEL_BG
-        BtnFrame.Parent = parent
+    -- Create Toggle Button Function
+    local function CreateToggleButton(name, callback)
+        local Button = Instance.new("TextButton")
+        Button.Name = name
+        Button.Size = UDim2.new(1, -10, 0, 45)
+        Button.BackgroundColor3 = VIETNAM_YELLOW
+        Button.TextColor3 = VIETNAM_RED
+        Button.TextSize = 18
+        Button.Font = Enum.Font.GothamBold
+        Button.Text = name .. ": OFF"
         
         local BtnCorner = Instance.new("UICorner")
         BtnCorner.CornerRadius = UDim.new(0, 6)
-        BtnCorner.Parent = BtnFrame
+        BtnCorner.Parent = Button
         
-        local Button = Instance.new("TextButton")
-        Button.Size = UDim2.new(1, 0, 1, 0)
-        Button.BackgroundTransparency = 1
-        Button.Text = text
-        Button.TextColor3 = Color3.new(1, 1, 1)
-        Button.TextSize = 13
-        Button.Font = Enum.Font.GothamSemibold
-        Button.Parent = BtnFrame
-        
+        local enabled = false
         Button.MouseButton1Click:Connect(function()
-            TweenService:Create(BtnFrame, TweenInfo.new(0.1), {BackgroundColor3 = VN_RED}):Play()
-            wait(0.1)
-            TweenService:Create(BtnFrame, TweenInfo.new(0.1), {BackgroundColor3 = PANEL_BG}):Play()
-            if callback then callback() end
+            enabled = not enabled
+            Button.Text = name .. ": " .. (enabled and "ON" or "OFF")
+            Button.BackgroundColor3 = enabled and Color3.fromRGB(0, 255, 0) or VIETNAM_YELLOW
+            callback(enabled)
         end)
         
-        return BtnFrame
+        return Button
     end
     
-    -- Create Dropdown Function
-    local function CreateDropdown(parent, text, options, callback)
-        local DropFrame = Instance.new("Frame")
-        DropFrame.Size = UDim2.new(1, 0, 0, 40)
-        DropFrame.BackgroundColor3 = PANEL_BG
-        DropFrame.Parent = parent
-        
-        local DropCorner = Instance.new("UICorner")
-        DropCorner.CornerRadius = UDim.new(0, 6)
-        DropCorner.Parent = DropFrame
-        
-        local Label = Instance.new("TextLabel")
-        Label.Size = UDim2.new(0.5, 0, 1, 0)
-        Label.Position = UDim2.new(0, 15, 0, 0)
-        Label.BackgroundTransparency = 1
-        Label.Text = text
-        Label.TextColor3 = Color3.new(1, 1, 1)
-        Label.TextSize = 13
-        Label.Font = Enum.Font.Gotham
-        Label.TextXAlignment = Enum.TextXAlignment.Left
-        Label.Parent = DropFrame
-        
-        local DropBtn = Instance.new("TextButton")
-        DropBtn.Size = UDim2.new(0, 120, 0, 30)
-        DropBtn.Position = UDim2.new(1, -130, 0.5, -15)
-        DropBtn.BackgroundColor3 = BUTTON_BG
-        DropBtn.Text = options[1]
-        DropBtn.TextColor3 = Color3.new(1, 1, 1)
-        DropBtn.TextSize = 12
-        DropBtn.Font = Enum.Font.Gotham
-        DropBtn.Parent = DropFrame
-        
-        local DropBtnCorner = Instance.new("UICorner")
-        DropBtnCorner.CornerRadius = UDim.new(0, 4)
-        DropBtnCorner.Parent = DropBtn
-        
-        local index = 1
-        DropBtn.MouseButton1Click:Connect(function()
-            index = index % #options + 1
-            DropBtn.Text = options[index]
-            if callback then callback(options[index]) end
-        end)
-        
-        return DropFrame
-    end
+    -- Auto Farm Toggle
+    CreateToggleButton("Auto Farm", function(enabled)
+        VietnameseHub.AutoFarm = enabled
+        if enabled then
+            VietnameseHub:StartAutoFarm()
+        end
+    end).Parent = ButtonContainer
     
-    -- TABS
-    local MainTab = CreateTab("Main", "🏠")
-    local FarmTab = CreateTab("Farm", "⚔️")
-    local StatsTab = CreateTab("Stats", "📊")
-    local TeleportTab = CreateTab("Teleport", "🌐")
-    local MiscTab = CreateTab("Misc", "⚙️")
+    -- Auto Attack Toggle
+    CreateToggleButton("Auto Attack", function(enabled)
+        VietnameseHub.AutoAttack = enabled
+    end).Parent = ButtonContainer
     
-    -- Connect Tab Buttons
-    for _, tab in pairs(Tabs) do
-        tab.Button.MouseButton1Click:Connect(function()
-            SwitchTab(tab.Name)
-        end)
-    end
+    -- Auto Buso Toggle
+    CreateToggleButton("Auto Buso", function(enabled)
+        VietnameseHub.AutoBuso = enabled
+    end).Parent = ButtonContainer
     
-    -- MAIN TAB
-    CreateToggle(MainTab, "Auto Random Fruit", "AutoFruit")
-    CreateToggle(MainTab, "Auto Store Fruits", "AutoStore")
-    CreateToggle(MainTab, "Auto Buy Abilities", "AutoAbilities")
-    CreateToggle(MainTab, "Auto Buso (Haki)", "AutoHaki")
-    CreateButton(MainTab, "Redeem All Codes", function()
-        local codes = {"EXP_5B","RESET_5B","ADMIN_TROLL","ADMIN_STRENGTH","JULYUPDATE_RESET","NOOB2PRO","CODESLIDE","15B_BESTBROTHERS","NOOB2ADMIN","REWARDFUN","CHICKEN","THEGREATACE","DRAGONABUSE","SECRET_ADMIN","STRAWHAT_MAIN","RANDOM_DF","BARRIER","SHUTDOWN_FIX","GAMEMODE","GAMEMODE1","SERVER_FIX","UPDATE11","XMASEXP","1BILLION","UPD16","UPD15","2BILLION","3BILLION","UPD14","UPD13","DEVSCOOKING","ENYU_IS_PRO","Magicbus","Sub2Fer999","Starcodeheo","Sub2NoobMaster123","Sub2Daigrock","Axiore","TantaiGaming","StrawHatMain","Sub2OfficialNoobie","TheGreatAce","Fudd10","Fudd10_V2","BIGNEWS","Update10","Sub2UncleKizaru","YOUTUBE_CLOSED","ZIOLES_CARRY","Bignews","TantaiGaming","STRAWHAT_MAIN","JCWK","Fudd10","1MLIKES_RESET","THIRDSEA","2BILLION","UPD14","UPD13","DEVSCOOKING","Axiore","Magicbus","JCWK","Starcodeheo","Bluxxy","Enyu_is_Pro","Sub2Fer999","GAMERROBOT_EXP1","GAMERROBOT_EXP","TY_FOR_WATCHING","EXP_5B","RESET_5B","kittgaming","Sub2CaptainMaui","DEVSCOOKING","HYPE_IS_BACK","NOOB_SET_UP"}
-        for _, code in pairs(codes) do
-            pcall(function()
-                ReplicatedStorage.Remotes.Redeem:InvokeServer(code)
-            end)
-            wait(0.1)
+    -- Fast Attack Toggle
+    CreateToggleButton("Fast Attack", function(enabled)
+        VietnameseHub.FastAttack = enabled
+    end).Parent = ButtonContainer
+    
+    -- Noclip Toggle
+    CreateToggleButton("Noclip", function(enabled)
+        VietnameseHub.Noclip = enabled
+        if enabled then
+            VietnameseHub:EnableNoclip()
+        end
+    end).Parent = ButtonContainer
+    
+    -- Sea Info Label
+    local SeaInfo = Instance.new("TextLabel")
+    SeaInfo.Name = "SeaInfo"
+    SeaInfo.Size = UDim2.new(1, -20, 0, 30)
+    SeaInfo.BackgroundTransparency = 1
+    SeaInfo.TextColor3 = VIETNAM_YELLOW
+    SeaInfo.TextSize = 16
+    SeaInfo.Font = Enum.Font.Gotham
+    SeaInfo.Text = "Current Sea: Detecting..."
+    SeaInfo.Parent = ButtonContainer
+    
+    -- Update Sea Info
+    task.spawn(function()
+        while task.wait(1) do
+            local sea = VietnameseHub:GetCurrentSea()
+            SeaInfo.Text = "Current Sea: " .. sea .. " | Enemy: " .. (VietnameseHub.SelectedEnemy and VietnameseHub.SelectedEnemy.Name or "None")
         end
     end)
     
-    -- FARM TAB
-    CreateToggle(FarmTab, "Auto Farm Level", "AutoFarm", function(e)
-        spawn(function()
-            while Config.AutoFarm do
-                wait()
-                pcall(function()
-                    local enemy = GetEnemy(CurrentSea)
-                    if enemy and enemy:FindFirstChild("HumanoidRootPart") then
-                        HumanoidRootPart.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
-                        AutoClick()
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(FarmTab, "Auto Farm Boss", "AutoBoss", function(e)
-        spawn(function()
-            while Config.AutoBoss do
-                wait()
-                pcall(function()
-                    local boss = GetBoss(CurrentSea)
-                    if boss and boss:FindFirstChild("HumanoidRootPart") then
-                        HumanoidRootPart.CFrame = boss.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
-                        AutoClick()
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(FarmTab, "Auto Farm Mastery", "AutoMastery", function(e)
-        spawn(function()
-            while Config.AutoMastery do
-                wait()
-                pcall(function()
-                    local enemy = GetEnemy(CurrentSea)
-                    if enemy then
-                        for _, tool in pairs(Player.Backpack:GetChildren()) do
-                            if tool:IsA("Tool") then
-                                if Config.Weapon == "Melee" and (tool.Name:lower():find("melee") or tool.Name:lower():find("combat") or tool.Name:lower():find("dark")) then
-                                    Humanoid:EquipTool(tool)
-                                elseif Config.Weapon == "Sword" and (tool.Name:lower():find("sword") or tool.Name:lower():find("blade")) then
-                                    Humanoid:EquipTool(tool)
-                                elseif Config.Weapon == "Gun" and (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol") or tool.Name:lower():find("rifle")) then
-                                    Humanoid:EquipTool(tool)
-                                elseif Config.Weapon == "Fruit" and tool.Name:lower():find("fruit") then
-                                    Humanoid:EquipTool(tool)
-                                end
-                            end
-                        end
-                        if enemy:FindFirstChild("HumanoidRootPart") then
-                            HumanoidRootPart.CFrame = enemy.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
-                            AutoClick()
-                        end
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateDropdown(FarmTab, "Select Weapon", {"Melee", "Sword", "Gun", "Fruit"}, function(opt)
-        Config.Weapon = opt
-    end)
-    
-    CreateToggle(FarmTab, "Auto Sea Beast", "AutoSeaBeast", function(e)
-        spawn(function()
-            while Config.AutoSeaBeast do
-                wait()
-                pcall(function()
-                    local beast = GetSeaBeast()
-                    if beast and beast:FindFirstChild("HumanoidRootPart") then
-                        HumanoidRootPart.CFrame = beast.HumanoidRootPart.CFrame * CFrame.new(0, 50, 0)
-                        AutoClick()
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(FarmTab, "Auto Raid", "AutoRaid", function(e)
-        spawn(function()
-            while Config.AutoRaid do
-                wait(1)
-                pcall(function()
-                    for _, v in pairs(Workspace:GetDescendants()) do
-                        if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-                            if v.Name:lower():find("raid") or v.Name:lower():find("enemy") then
-                                HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
-                                AutoClick()
-                            end
-                        end
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    -- STATS TAB
-    CreateToggle(StatsTab, "Auto Melee", "MeleeStats", function(e)
-        spawn(function()
-            while Config.AutoStats.Melee do
-                wait(0.5)
-                pcall(function()
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Melee", 1)
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(StatsTab, "Auto Defense", "DefenseStats", function(e)
-        spawn(function()
-            while Config.AutoStats.Defense do
-                wait(0.5)
-                pcall(function()
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Defense", 1)
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(StatsTab, "Auto Sword", "SwordStats", function(e)
-        spawn(function()
-            while Config.AutoStats.Sword do
-                wait(0.5)
-                pcall(function()
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Sword", 1)
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(StatsTab, "Auto Gun", "GunStats", function(e)
-        spawn(function()
-            while Config.AutoStats.Gun do
-                wait(0.5)
-                pcall(function()
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Gun", 1)
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(StatsTab, "Auto Fruit", "FruitStats", function(e)
-        spawn(function()
-            while Config.AutoStats.Fruit do
-                wait(0.5)
-                pcall(function()
-                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Demon Fruit", 1)
-                end)
-            end
-        end)
-    end)
-    
-    -- TELEPORT TAB LOCATIONS
-    local Locations = {
-        ["First Sea"] = {
-            ["Starter Island"] = CFrame.new(1057, 16, 1425),
-            ["Marine Start"] = CFrame.new(-2573, 6, -2043),
-            ["Middle Town"] = CFrame.new(-655, 8, -1102),
-            ["Jungle"] = CFrame.new(-1612, 37, 148),
-            ["Pirate Village"] = CFrame.new(-1181, 44, 79),
-            ["Desert"] = CFrame.new(897, 7, 4389),
-            ["Frozen Village"] = CFrame.new(1198, 27, -1217),
-            ["Marine Fortress"] = CFrame.new(-4505, 20, 4265),
-            ["Skylands"] = CFrame.new(-4968, 718, -2623),
-            ["Prison"] = CFrame.new(4854, 5, 723),
-            ["Colosseum"] = CFrame.new(-1427, 7, -3014),
-            ["Magma Village"] = CFrame.new(-5248, 9, 8497),
-            ["Underwater City"] = CFrame.new(61123, 18, 1569),
-            ["Fountain City"] = CFrame.new(6127, 5, 1833)
-        },
-        ["Second Sea"] = {
-            ["Cafe"] = CFrame.new(-380, 73, 304),
-            ["Kingdom of Rose"] = CFrame.new(-388, 73, 326),
-            ["Green Zone"] = CFrame.new(-2372, 73, -316),
-            ["Graveyard"] = CFrame.new(-5612, 9, 719),
-            ["Dark Arena"] = CFrame.new(3780, 14, -3594),
-            ["Snow Mountain"] = CFrame.new(561, 401, -5317),
-            ["Hot and Cold"] = CFrame.new(-6058, 16, -1534),
-            ["Cursed Ship"] = CFrame.new(923, 125, 32818),
-            ["Ice Castle"] = CFrame.new(5400, 15, -6026),
-            ["Forgotten Island"] = CFrame.new(-3041, 238, -10159),
-            ["Usoapp's Island"] = CFrame.new(5745, 9, -481)
-        },
-        ["Third Sea"] = {
-            ["Mansion"] = CFrame.new(-390, 332, 565),
-            ["Hydra Island"] = CFrame.new(5200, 10, 1500),
-            ["Great Tree"] = CFrame.new(2200, 30, -6500),
-            ["Castle on the Sea"] = CFrame.new(-5000, 50, -3000),
-            ["Floating Turtle"] = CFrame.new(-11000, 30, -17000),
-            ["Sea of Treats"] = CFrame.new(200, 50, -12000),
-            ["Port Town"] = CFrame.new(-200, 50, 4700),
-            ["Chocolate Land"] = CFrame.new(200, 50, 12500)
-        }
-    }
-    
-    for seaName, places in pairs(Locations) do
-        local SeaLabel = Instance.new("TextLabel")
-        SeaLabel.Size = UDim2.new(1, 0, 0, 25)
-        SeaLabel.BackgroundTransparency = 1
-        SeaLabel.Text = "━━━ " .. seaName .. " ━━━"
-        SeaLabel.TextColor3 = VN_YELLOW
-        SeaLabel.TextSize = 14
-        SeaLabel.Font = Enum.Font.GothamBold
-        SeaLabel.Parent = TeleportTab
-        
-        for placeName, cf in pairs(places) do
-            CreateButton(TeleportTab, "TP to " .. placeName, function()
-                pcall(function()
-                    HumanoidRootPart.CFrame = cf
-                end)
-            end)
-        end
-    end
-    
-    -- MISC TAB
-    CreateToggle(MiscTab, "Fruit ESP", "FruitESP", function(e)
-        spawn(function()
-            while Config.FruitESP do
-                wait(1)
-                pcall(function()
-                    for _, v in pairs(Workspace:GetChildren()) do
-                        if v.Name:find("Fruit") and v:FindFirstChild("Handle") then
-                            if not v.Handle:FindFirstChild("ESPGUI") then
-                                local b = Instance.new("BillboardGui")
-                                b.Name = "ESPGUI"
-                                b.AlwaysOnTop = true
-                                b.Size = UDim2.new(0, 200, 0, 50)
-                                b.Adornee = v.Handle
-                                b.MaxDistance = 999999
-                                local t = Instance.new("TextLabel")
-                                t.Size = UDim2.new(1, 0, 1, 0)
-                                t.BackgroundTransparency = 1
-                                t.Text = "🍎 " .. v.Name
-                                t.TextColor3 = Color3.fromRGB(255, 0, 0)
-                                t.TextSize = 20
-                                t.TextStrokeTransparency = 0
-                                t.Parent = b
-                                b.Parent = v.Handle
-                            end
-                        end
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateToggle(MiscTab, "Chest ESP", "ChestESP", function(e)
-        spawn(function()
-            while Config.ChestESP do
-                wait(1)
-                pcall(function()
-                    for _, v in pairs(Workspace:GetChildren()) do
-                        if v.Name:find("Chest") then
-                            if not v:FindFirstChild("ESPGUI") then
-                                local b = Instance.new("BillboardGui")
-                                b.Name = "ESPGUI"
-                                b.AlwaysOnTop = true
-                                b.Size = UDim2.new(0, 100, 0, 50)
-                                b.Adornee = v
-                                b.MaxDistance = 999999
-                                local t = Instance.new("TextLabel")
-                                t.Size = UDim2.new(1, 0, 1, 0)
-                                t.BackgroundTransparency = 1
-                                t.Text = "📦 Chest"
-                                t.TextColor3 = Color3.fromRGB(255, 255, 0)
-                                t.TextSize = 18
-                                t.TextStrokeTransparency = 0
-                                t.Parent = b
-                                b.Parent = v
-                            end
-                        end
-                    end
-                end)
-            end
-        end)
-    end)
-    
-    CreateButton(MiscTab, "Delete ESP", function()
-        for _, v in pairs(Workspace:GetDescendants()) do
-            if v.Name == "ESPGUI" then
-                v:Destroy()
-            end
-        end
-    end)
-    
-    CreateButton(MiscTab, "Rejoin Server", function()
-        game:GetService("TeleportService"):Teleport(game.PlaceId, Player)
-    end)
-    
-    CreateButton(MiscTab, "Server Hop", function()
-        local Http = game:GetService("HttpService")
-        local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        local Data = Http:JSONDecode(game:HttpGet(Api))
-        for _, v in pairs(Data.data) do
-            if v.playing < v.maxPlayers then
-                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, v.id, Player)
-                break
-            end
-        end
-    end)
-    
-    -- UI Controls
+    -- Make Draggable
     local dragging = false
-    local dragStart
-    local startPos
+    local dragInput, dragStart, startPos
     
     TitleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -791,55 +348,75 @@ local function LoadHub()
         end
     end)
     
-    UserInputService.InputEnded:Connect(function(input)
+    TitleBar.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
     
-    -- Minimize
-    local minimized = false
-    MinBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        if minimized then
-            ContentArea.Visible = false
-            Sidebar.Visible = false
-            MainFrame.Size = UDim2.new(0, 600, 0, 45)
-            MinBtn.Text = "+"
-        else
-            ContentArea.Visible = true
-            Sidebar.Visible = true
-            MainFrame.Size = UDim2.new(0, 600, 0, 400)
-            MinBtn.Text = "-"
-        end
-    end)
+    -- Close Button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 30, 0, 30)
+    CloseButton.Position = UDim2.new(1, -35, 0, 5)
+    CloseButton.BackgroundColor3 = VIETNAM_RED
+    CloseButton.TextColor3 = VIETNAM_YELLOW
+    CloseButton.Text = "X"
+    CloseButton.TextSize = 18
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.Parent = TitleBar
     
-    -- Close
-    CloseBtn.MouseButton1Click:Connect(function()
+    local CloseCorner = Instance.new("UICorner")
+    CloseCorner.CornerRadius = UDim.new(0, 4)
+    CloseCorner.Parent = CloseButton
+    
+    CloseButton.MouseButton1Click:Connect(function()
         ScreenGui:Destroy()
+        VietnameseHub.AutoFarm = false
+        VietnameseHub.AutoAttack = false
     end)
     
-    -- Character Handler
-    Player.CharacterAdded:Connect(function(newChar)
-        Character = newChar
-        Humanoid = newChar:WaitForChild("Humanoid")
-        HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
-        CurrentSea = GetSea()
-        SeaLabel.Text = "Sea " .. CurrentSea
+    -- Minimize Button
+    local MinButton = Instance.new("TextButton")
+    MinButton.Size = UDim2.new(0, 30, 0, 30)
+    MinButton.Position = UDim2.new(1, -70, 0, 5)
+    MinButton.BackgroundColor3 = VIETNAM_YELLOW
+    MinButton.TextColor3 = VIETNAM_RED
+    MinButton.Text = "-"
+    MinButton.TextSize = 24
+    MinButton.Font = Enum.Font.GothamBold
+    MinButton.Parent = TitleBar
+    
+    local MinCorner = Instance.new("UICorner")
+    MinCorner.CornerRadius = UDim.new(0, 4)
+    MinCorner.Parent = MinButton
+    
+    local minimized = false
+    MinButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        ButtonContainer.Visible = not minimized
+        Star.Visible = not minimized
+        MinButton.Text = minimized and "+" or "-"
     end)
     
-    -- Start with Main tab
-    SwitchTab("Main")
-    
-    -- Notification
-    game.StarterGui:SetCore("SendNotification", {
-        Title = "🇻🇳 Vietnamese Hub",
-        Text = "Sea " .. CurrentSea .. " Loaded! Made with ❤️",
-        Duration = 5
-    })
-    
-    print("🇻🇳 Vietnamese Hub Loaded Successfully!")
+    return ScreenGui
 end
 
--- Execute
-LoadHub()
+-- Initialize
+VietnameseHub.Enabled = true
+local UI = VietnameseHub:CreateUI()
+
+-- Character Respawn Handler
+LocalPlayer.CharacterAdded:Connect(function(char)
+    Character = char
+    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+    Humanoid = char:WaitForChild("Humanoid")
+end)
+
+-- Notification
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "🇻🇳 Vietnamese Hub",
+    Text = "Loaded successfully! Based on Teddy Hub",
+    Duration = 5
+})
+
+print("🇻🇳 Vietnamese Hub Loaded | Sea Detection: Active | Auto Farm: Ready")
